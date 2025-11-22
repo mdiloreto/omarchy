@@ -2,6 +2,9 @@
 
 # Designed to be run by systemd timer every 30 seconds and alerts if battery is low
 
+# Ensure Omarchy helper binaries are available when launched from systemd
+export PATH="$HOME/.local/share/omarchy/bin:$PATH"
+
 BATTERY_THRESHOLD=10
 NOTIFICATION_FLAG="/run/user/$UID/omarchy_battery_notified"
 BATTERY_LEVEL=$(omarchy-battery-remaining)

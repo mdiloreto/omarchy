@@ -1,23 +1,37 @@
 #!/bin/bash
 
-# Get remote tag
-latest_tag=$(git -C "$OMARCHY_PATH" ls-remote --tags origin | grep -v "{}" | awk '{print $2}' | sed 's#refs/tags/##' | sort -V | tail -n 1)
-if [[ -z "$latest_tag" ]]; then
-  echo "Error: Could not retrieve latest tag."
-  exit 1
+set -o pipefail
+
+updates_output=""
+update_count=0
+
+if command -v yay >/dev/null 2>&1; then
+  if updates_output=$(yay -Qu 2>/dev/null); then
+    if [[ -n "$updates_output" ]]; then
+      update_count=$(wc -l <<<"$updates_output")
+      echo "$update_count package updates available"
+      exit 0
+    fi
+  fi
 fi
 
-# Get local tag
-current_tag=$(git -C "$OMARCHY_PATH" describe --tags $(git -C "$OMARCHY_PATH" rev-list --tags --max-count=1))
-if [[ -z "$current_tag" ]]; then
-  echo "Error: Could not retrieve current tag."
-  exit 1
+latest_tag=""
+current_tag=""
+
+if [[ -n "${OMARCHY_PATH:-}" ]] && command -v git >/dev/null 2>&1 && [[ -d "$OMARCHY_PATH/.git" ]]; then
+  latest_tag=$(git -C "$OMARCHY_PATH" ls-remote --tags origin 2>/dev/null | grep -v "{}" | awk '{print $2}' | sed 's#refs/tags/##' | sort -V | tail -n 1)
+  current_tag=$(git -C "$OMARCHY_PATH" describe --tags $(git -C "$OMARCHY_PATH" rev-list --tags --max-count=1) 2>/dev/null)
 fi
 
-if [[ "$current_tag" != "$latest_tag" ]]; then
-  echo "Omarchy update available ($latest_tag)"
+if [[ -n "$latest_tag" && -n "$current_tag" && "$current_tag" != "$latest_tag" ]]; then
+  echo "Omarchy release $latest_tag available"
   exit 0
-else
-  echo "Omarchy is up to date ($current_tag)"
-  exit 1
 fi
+
+if [[ -n "$current_tag" ]]; then
+  echo "Omarchy is up to date ($current_tag)"
+else
+  echo "Omarchy is up to date"
+fi
+
+exit 1
