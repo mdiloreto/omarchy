@@ -19,5 +19,5 @@ if [[ "$current_tag" != "$latest_tag" ]]; then
   exit 0
 else
   echo "Omarchy is up to date ($current_tag)"
-  exit 1
+  exit 0
 fi

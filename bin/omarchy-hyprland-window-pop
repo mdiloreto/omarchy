@@ -6,23 +6,51 @@
 # omarchy-hyprland-window-pop [width height [x y]]
 #
 # Arguments:
-#   width   Optional. Width of the floating window. Default: 1300
-#   height  Optional. Height of the floating window. Default: 900
+#   width   Optional. Width of the floating window. If omitted,
+#           a monitor-specific default will be used.
+#   height  Optional. Height of the floating window. If omitted,
+#           a monitor-specific default will be used.
 #   x       Optional. X position of the window. Must provide both X and Y to take effect.
 #   y       Optional. Y position of the window. Must provide both X and Y to take effect.
 #
 # Behavior:
 #   - If the window is already pinned, it will be unpinned and removed from the pop layer.
-#   - If the window is not pinned, it will be floated, resized, moved/centered, pinned, brought to top, and popped.
+#   - If the window is not pinned, it will be floated, resized (per-monitor defaults unless overridden),
+#     moved/centered, pinned, brought to top, and popped.
 
-width=${1:-1300}
-height=${2:-900}
+width_arg=${1:-}
+height_arg=${2:-}
 x=${3:-}
 y=${4:-}
 
 active=$(hyprctl activewindow -j)
 pinned=$(echo "$active" | jq ".pinned")
+floating=$(echo "$active" | jq ".floating")
 addr=$(echo "$active" | jq -r ".address")
+
+# Choose width/height:
+# - If width/height are provided as arguments, use them.
+# - Otherwise, use 80% of the active monitor size.
+if [[ -z "$width_arg" || -z "$height_arg" ]]; then
+  mon_id=$(echo "$active" | jq ".monitor")
+  monitors=$(hyprctl monitors -j)
+  mon=$(echo "$monitors" | jq --argjson id "$mon_id" '.[] | select(.id == $id)')
+
+  mon_width=$(echo "$mon" | jq -r '.width // empty')
+  mon_height=$(echo "$mon" | jq -r '.height // empty')
+
+  if [[ -n "$mon_width" && -n "$mon_height" ]]; then
+    width=$(( mon_width * 78 / 100 ))
+    height=$(( mon_height * 782 / 100 ))
+  else
+    # Fallback if monitor info is missing
+    width=1300
+    height=900
+  fi
+else
+  width=$width_arg
+  height=$height_arg
+fi
 
 if [[ $pinned == "true" ]]; then
   hyprctl -q --batch \
@@ -30,13 +58,23 @@ if [[ $pinned == "true" ]]; then
     "dispatch togglefloating address:$addr;" \
     "dispatch tagwindow -pop address:$addr;"
 elif [[ -n $addr ]]; then
-  hyprctl dispatch togglefloating address:$addr
-  hyprctl dispatch resizeactive exact $width $height address:$addr
+  if [[ $floating == "false" ]]; then
+    # Tiled window: float and resize to target size
+    hyprctl dispatch togglefloating address:$addr
+    hyprctl dispatch resizeactive exact $width $height address:$addr
 
-  if [[ -n $x && -n $y ]]; then
-    hyprctl dispatch moveactive $x $y address:$addr
+    if [[ -n $x && -n $y ]]; then
+      hyprctl dispatch moveactive $x $y address:$addr
+    else
+      hyprctl dispatch centerwindow address:$addr
+    fi
   else
-    hyprctl dispatch centerwindow address:$addr
+    # Already-floating window (e.g., dialogs): keep its size, optionally center/move
+    if [[ -n $x && -n $y ]]; then
+      hyprctl dispatch moveactive $x $y address:$addr
+    else
+      hyprctl dispatch centerwindow address:$addr
+    fi
   fi
 
   hyprctl -q --batch \

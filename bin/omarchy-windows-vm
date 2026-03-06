@@ -1,5 +1,6 @@
 #!/bin/bash
-COMPOSE_FILE="$HOME/.config/windows/docker-compose.yml"
+SHARED_DIR="/mnt/shared"
+COMPOSE_FILE="${SHARED_DIR}/.config/windows/docker-compose.yml"
 
 check_prerequisites() {
   local DISK_SIZE_GB=${1:-64}
@@ -20,7 +21,7 @@ check_prerequisites() {
   fi
 
   # Check disk space
-  AVAILABLE_SPACE=$(df "$HOME" | awk 'NR==2 {print int($4/1024/1024)}')
+  AVAILABLE_SPACE=$(df "$SHARED_DIR" | awk 'NR==2 {print int($4/1024/1024)}')
   if [ "$AVAILABLE_SPACE" -lt "$REQUIRED_SPACE" ]; then
     echo "❌ Insufficient disk space!"
     echo "   Available: ${AVAILABLE_SPACE}GB"
@@ -37,21 +38,21 @@ install_windows() {
 
   omarchy-pkg-add freerdp openbsd-netcat gum
 
-  mkdir -p "$HOME/.windows"
-  mkdir -p "$HOME/.config/windows"
-  mkdir -p "$HOME/.local/share/applications/icons"
+  mkdir -p "$SHARED_DIR/.windows"
+  mkdir -p "$SHARED_DIR/.config/windows"
+  mkdir -p "$SHARED_DIR/.local/share/applications/icons"
 
   # Install Windows VM icon and desktop file
   if [ -f "$OMARCHY_PATH/applications/icons/windows.png" ]; then
-    cp "$OMARCHY_PATH/applications/icons/windows.png" "$HOME/.local/share/applications/icons/windows.png"
+    cp "$OMARCHY_PATH/applications/icons/windows.png" "$SHARED_DIR/.local/share/applications/icons/windows.png"
   fi
 
-  cat << EOF | tee "$HOME/.local/share/applications/windows-vm.desktop" > /dev/null
+  cat << EOF | tee "$SHARED_DIR/.local/share/applications/windows-vm.desktop" > /dev/null
 [Desktop Entry]
 Name=Windows
 Comment=Start Windows VM via Docker and connect with RDP
 Exec=uwsm app -- omarchy-windows-vm launch
-Icon=$HOME/.local/share/applications/icons/windows.png
+Icon=$SHARED_DIR/.local/share/applications/icons/windows.png
 Terminal=false
 Type=Application
 Categories=System;Virtualization;
@@ -96,7 +97,7 @@ EOF
     SELECTED_CORES=2
   fi
 
-  AVAILABLE_SPACE=$(df "$HOME" | awk 'NR==2 {print int($4/1024/1024)}')
+  AVAILABLE_SPACE=$(df "$SHARED_DIR" | awk 'NR==2 {print int($4/1024/1024)}')
   MAX_DISK_GB=$((AVAILABLE_SPACE - 10))  # Leave 10GB for Windows image
 
   # Check if we have enough space for minimum
@@ -170,7 +171,7 @@ EOF
     exit 1
   fi
 
-  mkdir -p $HOME/Windows
+  mkdir -p $SHARED_DIR/Windows
 
   # Create docker-compose.yml in user config directory
   cat << EOF | tee "$COMPOSE_FILE" > /dev/null
@@ -195,8 +196,8 @@ services:
       - 3389:3389/tcp
       - 3389:3389/udp
     volumes:
-      - $HOME/.windows:/storage
-      - $HOME/Windows:/shared
+      - $SHARED_DIR/.windows:/storage
+      - $SHARED_DIR/Windows:/shared
     restart: always
     stop_grace_period: 2m
 EOF
@@ -246,9 +247,9 @@ remove_windows() {
 
   docker rmi dockurr/windows 2>/dev/null || echo "Image already removed or not found"
 
-  rm "$HOME/.local/share/applications/windows-vm.desktop"
-  rm -rf "$HOME/.config/windows"
-  rm -rf "$HOME/.windows"
+  rm "$SHARED_DIR/.local/share/applications/windows-vm.desktop"
+  rm -rf "$SHARED_DIR/.config/windows"
+  rm -rf "$SHARED_DIR/.windows"
 
   echo ""
   echo "Windows VM removal completed!"
