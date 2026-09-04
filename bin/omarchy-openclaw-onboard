@@ -1,0 +1,73 @@
+#!/bin/bash
+
+# omarchy:summary=Run OpenClaw's setup wizard the way Omarchy needs it: in the terminal, installing the gateway as a user service, and returning when it is done.
+
+# Not bare `openclaw onboard`: as of 2026.9.1 that is the guided flow, which
+# ends by running a foreground gateway and handing off to a browser tab, and
+# never returns. --install-daemon keeps it to the classic wizard (minimal
+# prompts with --flow quickstart) that installs the gateway service, and
+# --skip-ui drops its closing Control UI/TUI prompt since whoever called this
+# opens one next.
+#
+# That classic wizard has one wrinkle: with --skip-ui it prints "Onboarding
+# complete" and then never exits. Upstream only calls exit(0) when it launched
+# the TUI, and the model sign-in leaves an open socket that keeps the process
+# alive otherwise. So the wizard runs in the foreground, owning the terminal
+# for its prompts, while a background watcher waits for the gateway to answer
+# and then stops it. That is safe because every prompt in the quickstart flow
+# runs before the gateway service is installed and reachable: by the time the
+# dashboard answers, only the closing notes are left.
+
+set -uo pipefail
+
+wizard=(openclaw onboard --flow quickstart --install-daemon --skip-ui)
+settle_seconds=${OMARCHY_OPENCLAW_ONBOARD_SETTLE_SECONDS:-3}
+
+pid_file=$(mktemp -u)
+trap 'rm -f "$pid_file"' EXIT
+
+gateway_answers() {
+  [[ -f $HOME/.openclaw/openclaw.json ]] || return 1
+  timeout 10 openclaw dashboard --json 2>/dev/null | jq -e '.ok == true' >/dev/null 2>&1
+}
+
+watch_and_stop() {
+  local target
+  while [[ ! -f $pid_file ]]; do sleep 0.2; done
+  target=$(cat "$pid_file")
+  while kill -0 "$target" 2>/dev/null; do
+    if gateway_answers; then
+      # Let the outro finish printing, then end the process the wizard leaves
+      # running.
+      sleep "$settle_seconds"
+      kill -TERM "$target" 2>/dev/null || true
+      return
+    fi
+    sleep 2
+  done
+}
+
+watch_and_stop &
+watcher=$!
+
+# The wizard runs foreground in a subshell that records its own pid first, so
+# it keeps the terminal for input while the watcher can find and stop it. exec
+# preserves the recorded pid.
+(
+  echo "$BASHPID" >"$pid_file"
+  exec "${wizard[@]}"
+)
+rc=$?
+
+kill "$watcher" 2>/dev/null || true
+wait "$watcher" 2>/dev/null || true
+
+# A wizard the watcher stopped after the gateway came up did its job; a
+# termination signal is not a failure then. A wizard that exited on its own,
+# including a user who chose "Skip for now" (no config, non-zero), keeps its
+# own exit code.
+if (( rc > 128 )) && gateway_answers; then
+  rc=0
+fi
+
+exit "$rc"
