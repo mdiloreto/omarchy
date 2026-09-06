@@ -1,15 +1,7 @@
-sudo mkdir -p /etc/sddm.conf.d
-
-if [ ! -f /etc/sddm.conf.d/autologin.conf ]; then
-  cat <<EOF | sudo tee /etc/sddm.conf.d/autologin.conf
-[Autologin]
-User=$USER
-Session=hyprland-uwsm
-
-[Theme]
-Current=breeze
-EOF
+# Prevent password-based SDDM logins from creating an encrypted login keyring
+# that conflicts with Omarchy's passwordless default keyring behavior. The ISO
+# owns autologin/session state because it knows whether the target is encrypted.
+if [[ -f /etc/pam.d/sddm ]]; then
+  sed -i '/-auth.*pam_gnome_keyring\.so/d' /etc/pam.d/sddm
+  sed -i '/-password.*pam_gnome_keyring\.so/d' /etc/pam.d/sddm
 fi
-
-# Don't use chrootable here as --now will cause issues for manual installs
-sudo systemctl enable sddm.service
