@@ -1,22 +1,7 @@
 #!/bin/bash
 
-# Toggle to pop-out a tile to stay fixed on a display basis.
-
-# Usage:
-# omarchy-hyprland-window-pop [width height [x y]]
-#
-# Arguments:
-#   width   Optional. Width of the floating window. If omitted,
-#           a monitor-specific default will be used.
-#   height  Optional. Height of the floating window. If omitted,
-#           a monitor-specific default will be used.
-#   x       Optional. X position of the window. Must provide both X and Y to take effect.
-#   y       Optional. Y position of the window. Must provide both X and Y to take effect.
-#
-# Behavior:
-#   - If the window is already pinned, it will be unpinned and removed from the pop layer.
-#   - If the window is not pinned, it will be floated, resized (per-monitor defaults unless overridden),
-#     moved/centered, pinned, brought to top, and popped.
+# omarchy:summary=Toggle to pop-out a tile to stay fixed on a display basis.
+# omarchy:args=[width height x y]
 
 width_arg=${1:-}
 height_arg=${2:-}
@@ -27,58 +12,50 @@ active=$(hyprctl activewindow -j)
 pinned=$(echo "$active" | jq ".pinned")
 floating=$(echo "$active" | jq ".floating")
 addr=$(echo "$active" | jq -r ".address")
+window="address:$addr"
 
-# Choose width/height:
-# - If width/height are provided as arguments, use them.
-# - Otherwise, use 80% of the active monitor size.
-if [[ -z "$width_arg" || -z "$height_arg" ]]; then
-  mon_id=$(echo "$active" | jq ".monitor")
-  monitors=$(hyprctl monitors -j)
-  mon=$(echo "$monitors" | jq --argjson id "$mon_id" '.[] | select(.id == $id)')
+hypr_dispatch() {
+  local lua="$1"
+  shift
 
-  mon_width=$(echo "$mon" | jq -r '.width // empty')
-  mon_height=$(echo "$mon" | jq -r '.height // empty')
+  hyprctl dispatch "$lua" >/dev/null 2>&1 || hyprctl dispatch "$@" >/dev/null
+}
 
-  if [[ -n "$mon_width" && -n "$mon_height" ]]; then
-    width=$(( mon_width * 78 / 100 ))
-    height=$(( mon_height * 782 / 100 ))
+if [[ -z $width_arg && -z $height_arg ]]; then
+  monitor_id=$(echo "$active" | jq ".monitor")
+  monitor=$(hyprctl monitors -j | jq --argjson id "$monitor_id" '.[] | select(.id == $id)')
+  monitor_width=$(echo "$monitor" | jq -r '.width // empty')
+  monitor_height=$(echo "$monitor" | jq -r '.height // empty')
+
+  if [[ -n $monitor_width && -n $monitor_height ]]; then
+    width=$((monitor_width * 78 / 100))
+    height=$((monitor_height * 78 / 100))
   else
-    # Fallback if monitor info is missing
     width=1300
     height=900
   fi
 else
-  width=$width_arg
-  height=$height_arg
+  width=${width_arg:-1300}
+  height=${height_arg:-900}
 fi
 
 if [[ $pinned == "true" ]]; then
-  hyprctl -q --batch \
-    "dispatch pin address:$addr;" \
-    "dispatch togglefloating address:$addr;" \
-    "dispatch tagwindow -pop address:$addr;"
+  hypr_dispatch "hl.dsp.window.pin({ window = \"$window\" })" pin "$window"
+  hypr_dispatch "hl.dsp.window.float({ window = \"$window\", action = \"toggle\" })" togglefloating "$window"
+  hypr_dispatch "hl.dsp.window.tag({ window = \"$window\", tag = \"-pop\" })" tagwindow -pop "$window"
 elif [[ -n $addr ]]; then
-  if [[ $floating == "false" ]]; then
-    # Tiled window: float and resize to target size
-    hyprctl dispatch togglefloating address:$addr
-    hyprctl dispatch resizeactive exact $width $height address:$addr
-
-    if [[ -n $x && -n $y ]]; then
-      hyprctl dispatch moveactive $x $y address:$addr
-    else
-      hyprctl dispatch centerwindow address:$addr
-    fi
-  else
-    # Already-floating window (e.g., dialogs): keep its size, optionally center/move
-    if [[ -n $x && -n $y ]]; then
-      hyprctl dispatch moveactive $x $y address:$addr
-    else
-      hyprctl dispatch centerwindow address:$addr
-    fi
+  if [[ $floating != "true" ]]; then
+    hypr_dispatch "hl.dsp.window.float({ window = \"$window\", action = \"toggle\" })" togglefloating "$window"
+    hypr_dispatch "hl.dsp.window.resize({ window = \"$window\", x = $width, y = $height })" resizeactive exact "$width" "$height" "$window"
   fi
 
-  hyprctl -q --batch \
-    "dispatch pin address:$addr;" \
-    "dispatch alterzorder top address:$addr;" \
-    "dispatch tagwindow +pop address:$addr;"
+  if [[ -n $x && -n $y ]]; then
+    hypr_dispatch "hl.dsp.window.move({ window = \"$window\", x = $x, y = $y })" moveactive "$x" "$y" "$window"
+  else
+    hypr_dispatch "hl.dsp.window.center({ window = \"$window\" })" centerwindow "$window"
+  fi
+
+  hypr_dispatch "hl.dsp.window.pin({ window = \"$window\" })" pin "$window"
+  hypr_dispatch "hl.dsp.window.alter_zorder({ window = \"$window\", mode = \"top\" })" alterzorder top "$window"
+  hypr_dispatch "hl.dsp.window.tag({ window = \"$window\", tag = \"+pop\" })" tagwindow +pop "$window"
 fi
