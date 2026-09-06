@@ -3,13 +3,14 @@
 # omarchy:summary=Toggle to pop-out a tile to stay fixed on a display basis.
 # omarchy:args=[width height x y]
 
-width=${1:-1300}
-height=${2:-900}
+width_arg=${1:-}
+height_arg=${2:-}
 x=${3:-}
 y=${4:-}
 
 active=$(hyprctl activewindow -j)
 pinned=$(echo "$active" | jq ".pinned")
+floating=$(echo "$active" | jq ".floating")
 addr=$(echo "$active" | jq -r ".address")
 window="address:$addr"
 
@@ -20,13 +21,33 @@ hypr_dispatch() {
   hyprctl dispatch "$lua" >/dev/null 2>&1 || hyprctl dispatch "$@" >/dev/null
 }
 
+if [[ -z $width_arg && -z $height_arg ]]; then
+  monitor_id=$(echo "$active" | jq ".monitor")
+  monitor=$(hyprctl monitors -j | jq --argjson id "$monitor_id" '.[] | select(.id == $id)')
+  monitor_width=$(echo "$monitor" | jq -r '.width // empty')
+  monitor_height=$(echo "$monitor" | jq -r '.height // empty')
+
+  if [[ -n $monitor_width && -n $monitor_height ]]; then
+    width=$((monitor_width * 78 / 100))
+    height=$((monitor_height * 78 / 100))
+  else
+    width=1300
+    height=900
+  fi
+else
+  width=${width_arg:-1300}
+  height=${height_arg:-900}
+fi
+
 if [[ $pinned == "true" ]]; then
   hypr_dispatch "hl.dsp.window.pin({ window = \"$window\" })" pin "$window"
   hypr_dispatch "hl.dsp.window.float({ window = \"$window\", action = \"toggle\" })" togglefloating "$window"
   hypr_dispatch "hl.dsp.window.tag({ window = \"$window\", tag = \"-pop\" })" tagwindow -pop "$window"
 elif [[ -n $addr ]]; then
-  hypr_dispatch "hl.dsp.window.float({ window = \"$window\", action = \"toggle\" })" togglefloating "$window"
-  hypr_dispatch "hl.dsp.window.resize({ window = \"$window\", x = $width, y = $height })" resizeactive exact "$width" "$height" "$window"
+  if [[ $floating != "true" ]]; then
+    hypr_dispatch "hl.dsp.window.float({ window = \"$window\", action = \"toggle\" })" togglefloating "$window"
+    hypr_dispatch "hl.dsp.window.resize({ window = \"$window\", x = $width, y = $height })" resizeactive exact "$width" "$height" "$window"
+  fi
 
   if [[ -n $x && -n $y ]]; then
     hypr_dispatch "hl.dsp.window.move({ window = \"$window\", x = $x, y = $y })" moveactive "$x" "$y" "$window"
